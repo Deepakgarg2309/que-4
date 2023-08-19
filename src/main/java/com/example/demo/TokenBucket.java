@@ -1,35 +1,46 @@
 package com.example.demo;
 
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
+
 public class TokenBucket {
     private final int capacity;
     private final long refillInterval;
-    private int tokens;
-    private long lastRefillTime;
+    private final ConcurrentHashMap<String, UserTokens> userTokensMap = new ConcurrentHashMap<>();
 
     public TokenBucket(int capacity, long refillInterval) {
-        this.capacity = capacity;
+        this.capacity = (capacity+1)/2;
         this.refillInterval = refillInterval;
-        this.tokens = capacity;
-        this.lastRefillTime = System.currentTimeMillis();
     }
 
-    public synchronized boolean tryConsumeToken() {
-        refillTokens();
-        if (tokens > 0) {
-            tokens--;
-            return true;
-        } else {
-            return false;
+    public boolean tryConsumeToken(String userId) {
+        UserTokens userTokens = userTokensMap.computeIfAbsent(userId, key -> new UserTokens(capacity, refillInterval));
+        return userTokens.tryConsumeToken();
+    }
+
+    private class UserTokens {
+        private final AtomicInteger tokens;
+        private long lastRefillTime;
+
+        UserTokens(int capacity, long refillInterval) {
+            this.tokens = new AtomicInteger(capacity);
+            this.lastRefillTime = System.currentTimeMillis();
         }
-    }
 
-    private void refillTokens() {
-        long currentTime = System.currentTimeMillis();
-        long elapsedTime = currentTime - lastRefillTime;
-        int newTokens = (int) (elapsedTime / refillInterval);
-        if (newTokens > 0) {
-            tokens = Math.min(tokens + newTokens, capacity);
-            lastRefillTime = currentTime;
+        boolean tryConsumeToken() {
+            refillTokens();
+            return tokens.getAndDecrement() > 0;
+        }
+
+        private void refillTokens() {
+            long currentTime = System.currentTimeMillis();
+            long elapsedTime = currentTime - lastRefillTime;
+            int newTokens = (int) (elapsedTime / refillInterval);
+
+            if (newTokens > 0) {
+                tokens.set(Math.min(tokens.get() + newTokens, capacity));
+                lastRefillTime = currentTime;
+            }
         }
     }
 }
